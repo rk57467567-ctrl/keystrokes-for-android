@@ -61,8 +61,8 @@ jobs:
                   applicationId = "com.example.keystrokes"
                   minSdk = 24
                   targetSdk = 34
-                  versionCode = 1
-                  versionName = "1.0"
+                  versionCode = 2
+                  versionName = "1.1"
               }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
@@ -118,8 +118,20 @@ jobs:
           cat > app/src/main/res/values/strings.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
-              <string name="service_desc">Показывает нажатия W, A, S, D и пробела с внешней клавиатуры</string>
+              <string name="service_desc">Показывает нажатия W, A, S, D, пробела и кнопок мыши</string>
           </resources>
+          EOF
+
+          cat > app/src/main/kotlin/com/example/keystrokes/Prefs.kt <<'EOF'
+          package com.example.keystrokes
+
+          import android.content.Context
+          import android.content.SharedPreferences
+
+          object Prefs {
+              fun sp(c: Context): SharedPreferences =
+                  c.getSharedPreferences("keystrokes_cfg", Context.MODE_PRIVATE)
+          }
           EOF
 
           cat > app/src/main/kotlin/com/example/keystrokes/MainActivity.kt <<'EOF'
@@ -127,35 +139,133 @@ jobs:
 
           import android.app.Activity
           import android.content.Intent
+          import android.graphics.Color
           import android.os.Bundle
           import android.provider.Settings
-          import android.view.Gravity
+          import android.view.View
           import android.widget.Button
           import android.widget.LinearLayout
+          import android.widget.ScrollView
+          import android.widget.SeekBar
+          import android.widget.Switch
           import android.widget.TextView
 
           class MainActivity : Activity() {
+
+              private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
-                  val pad = (24 * resources.displayMetrics.density).toInt()
-                  val layout = LinearLayout(this).apply {
+                  val sp = Prefs.sp(this)
+                  val pad = dp(20)
+
+                  val col = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
-                      gravity = Gravity.CENTER
-                      setPadding(pad, pad, pad, pad)
+                      setPadding(pad, pad + dp(16), pad, pad)
                   }
-                  val info = TextView(this).apply {
-                      text = "KEYSTROKES\n\n1. Нажмите кнопку ниже.\n2. Найдите KEYSTROKES в списке и включите.\n3. Подключите клавиатуру и нажимайте W A S D и пробел в любом приложении.\n"
-                      textSize = 18f
-                  }
-                  val btn = Button(this).apply {
-                      text = "Открыть настройки"
+
+                  col.addView(TextView(this).apply {
+                      text = "KEYSTROKES"
+                      textSize = 24f
+                  })
+                  col.addView(TextView(this).apply {
+                      text = "Сначала включите службу, потом настройте вид панели. Изменения видны сразу.\nКнопки мыши работают только на Android 14+."
+                      textSize = 14f
+                      setPadding(0, dp(8), 0, dp(8))
+                  })
+                  col.addView(Button(this).apply {
+                      text = "Открыть настройки службы"
                       setOnClickListener {
                           startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                       }
+                  })
+
+                  seek(col, "Размер", "size", 50, 250, 100, "%")
+                  seek(col, "Прозрачность", "alpha", 15, 100, 85, "%")
+                  seek(col, "Скругление", "radius", 0, 50, 25, "%")
+                  seek(col, "Позиция X", "posx", 0, 100, 5, "%")
+                  seek(col, "Позиция Y", "posy", 0, 100, 70, "%")
+
+                  switch(col, "Показывать пробел", "space", true)
+                  switch(col, "Показывать мышь (LMB / RMB)", "mouse", true)
+
+                  col.addView(TextView(this).apply {
+                      text = "Цвет подсветки"
+                      textSize = 16f
+                      setPadding(0, dp(16), 0, dp(8))
+                  })
+                  val colors = intArrayOf(
+                      Color.parseColor("#4CAF50"),
+                      Color.parseColor("#2196F3"),
+                      Color.parseColor("#F44336"),
+                      Color.parseColor("#FF9800"),
+                      Color.parseColor("#9C27B0"),
+                      Color.parseColor("#FFFFFF")
+                  )
+                  val colorRow = LinearLayout(this).apply {
+                      orientation = LinearLayout.HORIZONTAL
                   }
-                  layout.addView(info)
-                  layout.addView(btn)
-                  setContentView(layout)
+                  for (c in colors) {
+                      val v = View(this).apply {
+                          setBackgroundColor(c)
+                          setOnClickListener {
+                              sp.edit().putInt("color", c).apply()
+                          }
+                      }
+                      val lp = LinearLayout.LayoutParams(dp(44), dp(44))
+                      lp.setMargins(0, 0, dp(10), 0)
+                      colorRow.addView(v, lp)
+                  }
+                  col.addView(colorRow)
+
+                  col.addView(Button(this).apply {
+                      text = "Сбросить настройки"
+                      setOnClickListener {
+                          sp.edit().clear().apply()
+                          recreate()
+                      }
+                  })
+
+                  val scroll = ScrollView(this)
+                  scroll.addView(col)
+                  setContentView(scroll)
+              }
+
+              private fun seek(parent: LinearLayout, title: String, key: String, lo: Int, hi: Int, def: Int, unit: String) {
+                  val sp = Prefs.sp(this)
+                  val cur = sp.getInt(key, def)
+                  val label = TextView(this).apply {
+                      text = "$title: $cur$unit"
+                      textSize = 16f
+                      setPadding(0, dp(16), 0, 0)
+                  }
+                  val bar = SeekBar(this)
+                  bar.max = hi - lo
+                  bar.progress = cur - lo
+                  bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                      override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
+                          val v = p + lo
+                          label.text = "$title: $v$unit"
+                          if (fromUser) sp.edit().putInt(key, v).apply()
+                      }
+                      override fun onStartTrackingTouch(s: SeekBar?) {}
+                      override fun onStopTrackingTouch(s: SeekBar?) {}
+                  })
+                  parent.addView(label)
+                  parent.addView(bar)
+              }
+
+              private fun switch(parent: LinearLayout, title: String, key: String, def: Boolean) {
+                  val sp = Prefs.sp(this)
+                  val sw = Switch(this)
+                  sw.text = title
+                  sw.textSize = 16f
+                  sw.isChecked = sp.getBoolean(key, def)
+                  sw.setPadding(0, dp(16), 0, 0)
+                  sw.setOnCheckedChangeListener { _, checked ->
+                      sp.edit().putBoolean(key, checked).apply()
+                  }
+                  parent.addView(sw)
               }
           }
           EOF
@@ -164,61 +274,135 @@ jobs:
           package com.example.keystrokes
 
           import android.accessibilityservice.AccessibilityService
+          import android.content.Intent
+          import android.content.SharedPreferences
+          import android.content.res.Configuration
           import android.graphics.Color
           import android.graphics.PixelFormat
+          import android.graphics.Typeface
           import android.graphics.drawable.GradientDrawable
+          import android.os.Build
           import android.view.Gravity
+          import android.view.InputDevice
           import android.view.KeyEvent
+          import android.view.MotionEvent
+          import android.view.View
           import android.view.WindowManager
           import android.view.accessibility.AccessibilityEvent
           import android.widget.LinearLayout
           import android.widget.TextView
 
-          class KeyService : AccessibilityService() {
+          class KeyService : AccessibilityService(), SharedPreferences.OnSharedPreferenceChangeListener {
+
+              companion object {
+                  const val MOUSE_L = 1000001
+                  const val MOUSE_R = 1000002
+              }
 
               private val wm by lazy { getSystemService(WINDOW_SERVICE) as WindowManager }
               private var root: LinearLayout? = null
-              private val labels = mutableMapOf<Int, TextView>()
+              private val cells = mutableMapOf<Int, TextView>()
 
-              private val idleColor = Color.argb(153, 0, 0, 0)
-              private val activeColor = Color.argb(255, 46, 125, 50)
+              private var idleColor = Color.argb(200, 24, 24, 24)
+              private var activeColor = Color.GREEN
+              private var radiusPx = 0f
 
-              private val keyNames = linkedMapOf(
-                  KeyEvent.KEYCODE_W to "W",
-                  KeyEvent.KEYCODE_A to "A",
-                  KeyEvent.KEYCODE_S to "S",
-                  KeyEvent.KEYCODE_D to "D",
-                  KeyEvent.KEYCODE_SPACE to "SPACE"
-              )
-
-              private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+              private fun dp(v: Float) = (v * resources.displayMetrics.density).toInt()
 
               private fun box(color: Int) = GradientDrawable().apply {
                   setColor(color)
-                  cornerRadius = dp(8).toFloat()
+                  cornerRadius = radiusPx
               }
 
-              override fun onServiceConnected() {
-                  super.onServiceConnected()
-                  if (root != null) return
-                  val row = LinearLayout(this).apply {
-                      orientation = LinearLayout.HORIZONTAL
-                      setPadding(dp(8), dp(8), dp(8), dp(8))
+              private fun setActive(code: Int, on: Boolean) {
+                  cells[code]?.background = box(if (on) activeColor else idleColor)
+              }
+
+              private fun addCell(
+                  parent: LinearLayout, code: Int, label: String,
+                  w: Int, h: Int, left: Int, right: Int, bottom: Int, textSizeSp: Float
+              ) {
+                  val tv = TextView(this).apply {
+                      text = label
+                      setTextColor(Color.WHITE)
+                      textSize = textSizeSp
+                      typeface = Typeface.MONOSPACE
+                      gravity = Gravity.CENTER
+                      background = box(idleColor)
                   }
-                  for ((code, name) in keyNames) {
-                      val tv = TextView(this).apply {
-                          text = name
-                          setTextColor(Color.WHITE)
-                          textSize = 16f
-                          gravity = Gravity.CENTER
-                          background = box(idleColor)
-                      }
-                      val w = if (code == KeyEvent.KEYCODE_SPACE) dp(80) else dp(44)
-                      val lp = LinearLayout.LayoutParams(w, dp(44))
-                      lp.setMargins(dp(3), 0, dp(3), 0)
-                      row.addView(tv, lp)
-                      labels[code] = tv
+                  val lp = LinearLayout.LayoutParams(w, h)
+                  lp.setMargins(left, 0, right, bottom)
+                  parent.addView(tv, lp)
+                  cells[code] = tv
+              }
+
+              private fun removeOverlay() {
+                  root?.let {
+                      try { wm.removeView(it) } catch (e: Exception) {}
                   }
+                  root = null
+                  cells.clear()
+              }
+
+              private fun buildOverlay() {
+                  removeOverlay()
+                  val sp = Prefs.sp(this)
+                  val scale = sp.getInt("size", 100) / 100f
+                  val alphaPct = sp.getInt("alpha", 85)
+                  val radiusPct = sp.getInt("radius", 25)
+                  val posX = sp.getInt("posx", 5)
+                  val posY = sp.getInt("posy", 70)
+                  val showSpace = sp.getBoolean("space", true)
+                  val showMouse = sp.getBoolean("mouse", true)
+                  val color = sp.getInt("color", Color.parseColor("#4CAF50"))
+
+                  val a = alphaPct * 255 / 100
+                  idleColor = Color.argb(a, 24, 24, 24)
+                  activeColor = Color.argb(maxOf(a, 200), Color.red(color), Color.green(color), Color.blue(color))
+
+                  val s = dp(46f * scale)
+                  val g = dp(4f * scale)
+                  val total = 3 * s + 2 * g
+                  val ts = 16f * scale
+                  radiusPx = s * radiusPct / 100f
+
+                  val col = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setPadding(g, g, g, g)
+                  }
+
+                  val row1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                  addCell(row1, KeyEvent.KEYCODE_W, "W", s, s, s + g, 0, g, ts)
+                  col.addView(row1)
+
+                  val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                  addCell(row2, KeyEvent.KEYCODE_A, "A", s, s, 0, g, g, ts)
+                  addCell(row2, KeyEvent.KEYCODE_S, "S", s, s, 0, g, g, ts)
+                  addCell(row2, KeyEvent.KEYCODE_D, "D", s, s, 0, 0, g, ts)
+                  col.addView(row2)
+
+                  if (showSpace) {
+                      val row3 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                      addCell(row3, KeyEvent.KEYCODE_SPACE, "---", total, s / 2, 0, 0, if (showMouse) g else 0, ts)
+                      col.addView(row3)
+                  }
+
+                  if (showMouse) {
+                      val row4 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                      val half = (total - g) / 2
+                      addCell(row4, MOUSE_L, "LMB", half, s, 0, g, 0, ts)
+                      addCell(row4, MOUSE_R, "RMB", half, s, 0, 0, 0, ts)
+                      col.addView(row4)
+                  }
+
+                  col.measure(
+                      View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                      View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                  )
+                  val dm = resources.displayMetrics
+                  val x = ((dm.widthPixels - col.measuredWidth) * posX / 100f).toInt()
+                  val y = ((dm.heightPixels - col.measuredHeight) * posY / 100f).toInt()
+
                   val params = WindowManager.LayoutParams(
                       WindowManager.LayoutParams.WRAP_CONTENT,
                       WindowManager.LayoutParams.WRAP_CONTENT,
@@ -227,30 +411,60 @@ jobs:
                           WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
                       PixelFormat.TRANSLUCENT
                   )
-                  params.gravity = Gravity.BOTTOM or Gravity.START
-                  params.x = dp(16)
-                  params.y = dp(16)
-                  wm.addView(row, params)
-                  root = row
+                  params.gravity = Gravity.TOP or Gravity.START
+                  params.x = x
+                  params.y = y
+                  wm.addView(col, params)
+                  root = col
+              }
+
+              override fun onServiceConnected() {
+                  super.onServiceConnected()
+                  if (Build.VERSION.SDK_INT >= 34) {
+                      try {
+                          val info = serviceInfo
+                          if (info != null) {
+                              info.setMotionEventSources(InputDevice.SOURCE_MOUSE)
+                              serviceInfo = info
+                          }
+                      } catch (e: Throwable) {
+                      }
+                  }
+                  Prefs.sp(this).registerOnSharedPreferenceChangeListener(this)
+                  buildOverlay()
+              }
+
+              override fun onSharedPreferenceChanged(sp: SharedPreferences?, key: String?) {
+                  buildOverlay()
+              }
+
+              override fun onConfigurationChanged(newConfig: Configuration) {
+                  super.onConfigurationChanged(newConfig)
+                  buildOverlay()
               }
 
               override fun onKeyEvent(event: KeyEvent): Boolean {
-                  val tv = labels[event.keyCode] ?: return false
+                  if (!cells.containsKey(event.keyCode)) return false
                   when (event.action) {
-                      KeyEvent.ACTION_DOWN -> tv.background = box(activeColor)
-                      KeyEvent.ACTION_UP -> tv.background = box(idleColor)
+                      KeyEvent.ACTION_DOWN -> setActive(event.keyCode, true)
+                      KeyEvent.ACTION_UP -> setActive(event.keyCode, false)
                   }
                   return false
+              }
+
+              override fun onMotionEvent(event: MotionEvent) {
+                  val bs = event.buttonState
+                  setActive(MOUSE_L, (bs and MotionEvent.BUTTON_PRIMARY) != 0)
+                  setActive(MOUSE_R, (bs and MotionEvent.BUTTON_SECONDARY) != 0)
               }
 
               override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
 
               override fun onInterrupt() {}
 
-              override fun onUnbind(intent: android.content.Intent?): Boolean {
-                  root?.let { wm.removeView(it) }
-                  root = null
-                  labels.clear()
+              override fun onUnbind(intent: Intent?): Boolean {
+                  Prefs.sp(this).unregisterOnSharedPreferenceChangeListener(this)
+                  removeOverlay()
                   return super.onUnbind(intent)
               }
           }
