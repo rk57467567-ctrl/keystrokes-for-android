@@ -61,8 +61,8 @@ jobs:
                   applicationId = "com.example.keystrokes"
                   minSdk = 24
                   targetSdk = 34
-                  versionCode = 2
-                  versionName = "1.1"
+                  versionCode = 3
+                  versionName = "1.2"
               }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
@@ -118,7 +118,7 @@ jobs:
           cat > app/src/main/res/values/strings.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
-              <string name="service_desc">Показывает нажатия W, A, S, D, пробела и кнопок мыши</string>
+              <string name="service_desc">Показывает нажатия W, A, S, D и пробела с внешней клавиатуры</string>
           </resources>
           EOF
 
@@ -169,7 +169,7 @@ jobs:
                       textSize = 24f
                   })
                   col.addView(TextView(this).apply {
-                      text = "Сначала включите службу, потом настройте вид панели. Изменения видны сразу.\nКнопки мыши работают только на Android 14+."
+                      text = "Сначала включите службу, потом настройте вид панели. Изменения видны сразу."
                       textSize = 14f
                       setPadding(0, dp(8), 0, dp(8))
                   })
@@ -187,7 +187,6 @@ jobs:
                   seek(col, "Позиция Y", "posy", 0, 100, 70, "%")
 
                   switch(col, "Показывать пробел", "space", true)
-                  switch(col, "Показывать мышь (LMB / RMB)", "mouse", true)
 
                   col.addView(TextView(this).apply {
                       text = "Цвет подсветки"
@@ -281,11 +280,8 @@ jobs:
           import android.graphics.PixelFormat
           import android.graphics.Typeface
           import android.graphics.drawable.GradientDrawable
-          import android.os.Build
           import android.view.Gravity
-          import android.view.InputDevice
           import android.view.KeyEvent
-          import android.view.MotionEvent
           import android.view.View
           import android.view.WindowManager
           import android.view.accessibility.AccessibilityEvent
@@ -293,11 +289,6 @@ jobs:
           import android.widget.TextView
 
           class KeyService : AccessibilityService(), SharedPreferences.OnSharedPreferenceChangeListener {
-
-              companion object {
-                  const val MOUSE_L = 1000001
-                  const val MOUSE_R = 1000002
-              }
 
               private val wm by lazy { getSystemService(WINDOW_SERVICE) as WindowManager }
               private var root: LinearLayout? = null
@@ -353,7 +344,6 @@ jobs:
                   val posX = sp.getInt("posx", 5)
                   val posY = sp.getInt("posy", 70)
                   val showSpace = sp.getBoolean("space", true)
-                  val showMouse = sp.getBoolean("mouse", true)
                   val color = sp.getInt("color", Color.parseColor("#4CAF50"))
 
                   val a = alphaPct * 255 / 100
@@ -383,16 +373,8 @@ jobs:
 
                   if (showSpace) {
                       val row3 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                      addCell(row3, KeyEvent.KEYCODE_SPACE, "---", total, s / 2, 0, 0, if (showMouse) g else 0, ts)
+                      addCell(row3, KeyEvent.KEYCODE_SPACE, "---", total, s / 2, 0, 0, 0, ts)
                       col.addView(row3)
-                  }
-
-                  if (showMouse) {
-                      val row4 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                      val half = (total - g) / 2
-                      addCell(row4, MOUSE_L, "LMB", half, s, 0, g, 0, ts)
-                      addCell(row4, MOUSE_R, "RMB", half, s, 0, 0, 0, ts)
-                      col.addView(row4)
                   }
 
                   col.measure(
@@ -420,16 +402,6 @@ jobs:
 
               override fun onServiceConnected() {
                   super.onServiceConnected()
-                  if (Build.VERSION.SDK_INT >= 34) {
-                      try {
-                          val info = serviceInfo
-                          if (info != null) {
-                              info.setMotionEventSources(InputDevice.SOURCE_MOUSE)
-                              serviceInfo = info
-                          }
-                      } catch (e: Throwable) {
-                      }
-                  }
                   Prefs.sp(this).registerOnSharedPreferenceChangeListener(this)
                   buildOverlay()
               }
@@ -450,12 +422,6 @@ jobs:
                       KeyEvent.ACTION_UP -> setActive(event.keyCode, false)
                   }
                   return false
-              }
-
-              override fun onMotionEvent(event: MotionEvent) {
-                  val bs = event.buttonState
-                  setActive(MOUSE_L, (bs and MotionEvent.BUTTON_PRIMARY) != 0)
-                  setActive(MOUSE_R, (bs and MotionEvent.BUTTON_SECONDARY) != 0)
               }
 
               override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
